@@ -7,6 +7,7 @@ eps = 1e-6
 class Point:
     def __init__(self, p):
         self.p = p
+        self.p_homo = np.append(self.p, 1)
 
     def distance_line(self, line, return_vertical_point=False):
         assert isinstance(line, Line)
@@ -34,6 +35,8 @@ class Line:
         else:
             self.p, self.v = np.array(p), normalize(np.array(v) - np.array(p))
 
+        self.p_homo = np.append(self.p, 1)
+
     def distance_line(self, line2, return_vertical_point=False):
         assert isinstance(line2, Line)
         a = np.vstack([self.v, line2.v]).transpose()
@@ -54,6 +57,15 @@ class Line:
         assert isinstance(point, Point)
         return point.distance_line(self)
 
+    def intersect_plane(self, plane, return_coeffs=False):
+        assert isinstance(plane, Plane)
+        a = np.vstack([plane.v1, plane.v2, -self.v])
+        b = self.p - plane.p
+        a1, a2, c = np.linalg.solve(a, b)
+        intersection = plane.p + a1 * plane.v1 + a2 * plane.v2
+        assert np.linalg.norm(intersection - self.p + self.v * c) <= eps
+        return (intersection, a1, a2, c) if return_coeffs else intersection
+
 
 class Plane:
     def __init__(self, p, v1, v2, plane_format="point vectors"):
@@ -72,10 +84,15 @@ class Plane:
         assert np.linalg.norm(self.v1 - self.v2) >= eps and np.linalg.norm(self.v1 + self.v2) >= eps, \
             "two vectors are parallel"
         self.norm = normalize(np.cross(self.v1, self.v2))
+        self.p_homo = np.append(self.p, 1)
 
     def distance_point(self, point):
         assert isinstance(point, Point), "input argument must be a point"
         return point.distance_plane(self)
+
+    def intersect_line(self, line, return_coeffs=False):
+        assert isinstance(line, Line), "input argument must be a line"
+        return line.intersect_plane(self, return_coeffs)
 
 
 class Parallelogram(Plane):
@@ -91,3 +108,40 @@ class Parallelogram(Plane):
             self.l1 = np.array(l1)
             self.l2 = np.array(l2)
 
+    def intersect_line(self, line, return_coeffs=False):
+        intersection, a1, a2, c = super().intersect_line(line, True)
+        if return_coeffs:
+            return 0 <= a1 <= self.l1 and 0 <= a2 <= self.l2, intersection, a1, a2, c
+        else:
+            return intersection
+
+
+class Scene:
+    def __init__(self, l, w, h):
+        self.l = l
+        self.w = w
+        self.h = h
+
+
+class Camera:
+    def __init__(self, position, fov, axis, scene):
+        self.word_image = None
+        self.position = Point(position)
+        self.fov = fov
+        self.axis = axis  # currently only assuming the camera is on the plane where one of the coordinate is 0
+        self.scene = scene
+        print(np.hstack([np.eye(3), -np.expand_dims(self.position.p, 1)]).shape)
+        print(np.expand_dims(np.array([0, 0, 0, 1]), 0).shape)
+        self.world_camera_centered = np.vstack([np.hstack([np.eye(3), -np.expand_dims(self.position.p, 1)]),
+                                                np.array([[0, 0, 0, 1]])])
+        print(self.world_camera_centered)
+        self.camera_centered_word = np.vstack([np.hstack([np.eye(3), np.expand_dims(self.position.p, 1)]),
+                                               np.array([[0, 0, 0, 1]])])
+
+        if self.axis == 0:
+            self.camera_centered_word_wall = np.array([[0, 1, 0, 1], [0, 0, 1, 1], [1, 0, 0, 1], [0, 0, 0, 1]])
+        elif self.axis == 1:
+            self.camera_centered_word_wall = np.array([[1, 0, 0, 1], [0, 0, 1, 1], [0, 1, 0, 1], [0, 0, 0, 1]])
+        else:
+            raise Exception(f"illegal axis {self.axis}")
+        self.wall_camera_centered_word = self.camera_centered_word_wall.T
