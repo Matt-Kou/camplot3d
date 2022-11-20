@@ -1,4 +1,5 @@
 import numpy as np
+from math import tan
 from utils import normalize
 
 eps = 1e-6
@@ -124,24 +125,33 @@ class Scene:
 
 
 class Camera:
-    def __init__(self, position, fov, axis, scene):
+    def __init__(self, position, fov_h, axis, scene, screen_ratio=(16,9)):
         self.word_image = None
         self.position = Point(position)
-        self.fov = fov
+        self.fov_h = fov_h
         self.axis = axis  # currently only assuming the camera is on the plane where one of the coordinate is 0
         self.scene = scene
-        print(np.hstack([np.eye(3), -np.expand_dims(self.position.p, 1)]).shape)
-        print(np.expand_dims(np.array([0, 0, 0, 1]), 0).shape)
         self.world_camera_centered = np.vstack([np.hstack([np.eye(3), -np.expand_dims(self.position.p, 1)]),
                                                 np.array([[0, 0, 0, 1]])])
-        print(self.world_camera_centered)
         self.camera_centered_word = np.vstack([np.hstack([np.eye(3), np.expand_dims(self.position.p, 1)]),
                                                np.array([[0, 0, 0, 1]])])
 
         if self.axis == 0:
-            self.camera_centered_word_wall = np.array([[0, 1, 0, 1], [0, 0, 1, 1], [1, 0, 0, 1], [0, 0, 0, 1]])
+            self.camera_centered_word_wall = np.array([[0, 1, 0, 0], [0, 0, 1, 0], [1, 0, 0, 0], [0, 0, 0, 1]])
         elif self.axis == 1:
-            self.camera_centered_word_wall = np.array([[1, 0, 0, 1], [0, 0, 1, 1], [0, 1, 0, 1], [0, 0, 0, 1]])
+            self.camera_centered_word_wall = np.array([[1, 0, 0, 0], [0, 0, 1, 0], [0, 1, 0, 0], [0, 0, 0, 1]])
         else:
             raise Exception(f"illegal axis {self.axis}")
         self.wall_camera_centered_word = self.camera_centered_word_wall.T
+
+        self.wall_2d = np.array([[1, 0, 0, 0], [0, 1, 0, 0], [0, 0, 1, 0]])
+
+        self.screen_h = tan(self.fov_h)
+        self.screen_v = self.screen_h / screen_ratio[0] * screen_ratio[1]
+
+    def to_screen(self, point):
+        x, y, z = point
+        screen_x, screen_y = x / z, y / z
+        if abs(screen_x) > self.screen_h and abs(screen_y) > self.screen_v:
+            return None
+        return x, y
