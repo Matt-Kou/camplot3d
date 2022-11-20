@@ -148,6 +148,7 @@ class Camera:
 
         self.screen_h = tan(self.fov_h)
         self.screen_v = self.screen_h / screen_ratio[0] * screen_ratio[1]
+        self.world_2d = self.wall_2d @ self.camera_centered_word_wall @ self.world_camera_centered
 
     def to_screen(self, point):
         x, y, z = point
