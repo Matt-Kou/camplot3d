@@ -117,42 +117,98 @@ class Parallelogram(Plane):
             return intersection
 
 
-class Scene:
-    def __init__(self, l, w, h):
-        self.l = l
-        self.w = w
-        self.h = h
+# class Camera:
+#     def __init__(self, position, fov_h, axis, screen_ratio=(16, 9)):
+#         self.word_image = None
+#         self.position = Point(position)
+#         self.fov_h = fov_h
+#         self.axis = axis  # currently only assuming the camera is on the plane where one of the coordinate is 0
+#         self.screen_ratio = screen_ratio
+#         self.world_camera_centered = np.vstack([np.hstack([np.eye(3), -np.expand_dims(self.position.p, 1)]),
+#                                                 np.array([[0, 0, 0, 1]])])
+#         self.camera_centered_word = np.vstack([np.hstack([np.eye(3), np.expand_dims(self.position.p, 1)]),
+#                                                np.array([[0, 0, 0, 1]])])
+#
+#         if self.axis == 0:
+#             self.camera_centered_wall = np.array([[0, 1, 0, 0], [0, 0, 1, 0], [1, 0, 0, 0], [0, 0, 0, 1]])
+#         elif self.axis == 1:
+#             self.camera_centered_wall = np.array([[1, 0, 0, 0], [0, 0, 1, 0], [0, 1, 0, 0], [0, 0, 0, 1]])
+#         else:
+#             raise Exception(f"illegal axis {self.axis}")
+#         self.wall_camera_centered = self.camera_centered_wall.T
+#
+#         self.wall_2d = np.array([[1, 0, 0, 0], [0, 1, 0, 0], [0, 0, 1, 0]])
+#
+#         self.screen_h = tan(self.fov_h)
+#         self.screen_v = self.screen_h / screen_ratio[0] * screen_ratio[1]
+#         self.world_2d = self.wall_2d @ self.camera_centered_wall @ self.world_camera_centered
+#
+#     def to_centered_screen(self, point):
+#         x, y, z = point
+#         if z <= 0.:
+#             return None
+#         screen_x, screen_y = x / z, y / z
+#         if abs(screen_x) > self.screen_h and abs(screen_y) > self.screen_v:
+#             return None
+#         return x, y
+#
+#     def centered_screen_real_screen(self, point2d, pixel_h):
+#         half_pixel_h = pixel_h // 2
+#         half_pixel_v = half_pixel_h * self.screen_ratio[1] // self.screen_ratio[0]
+#         return point2d[0] * half_pixel_h / self.screen_h + half_pixel_h, \
+#                point2d[1] * half_pixel_v / self.screen_v + half_pixel_v
+#
+#     def world_image_coords(self, point, pixel_h, return_int=True):
+#         assert isinstance(point, Point)
+#         centered_screen_coords = self.to_centered_screen(self.world_2d @ point.p_homo)
+#         if centered_screen_coords is None:
+#             return None
+#         return [int(coord) for coord in self.centered_screen_real_screen(centered_screen_coords, pixel_h)] \
+#             if return_int else self.centered_screen_real_screen(centered_screen_coords, pixel_h)
+#
+#     def real_screen_line(self, point2d, pixel_h):
+#         half_pixel_h = pixel_h // 2
+#         half_pixel_v = half_pixel_h * self.screen_ratio[1] // self.screen_ratio[0]
+#         wall_vec = np.array([(point2d[0] - half_pixel_h) * self.screen_h / half_pixel_h,
+#                              (point2d[1] - half_pixel_v) * self.screen_v / half_pixel_v,
+#                              1., 1.])
+#         vec = self.wall_camera_centered @ wall_vec
+#         line = Line(self.position.p, vec[:3])
+#         return line
 
 
 class Camera:
-    def __init__(self, position, fov_h, axis, scene, screen_ratio=(16,9)):
-        self.word_image = None
-        self.position = Point(position)
+    def __init__(self, position, direction, up, fov_h, screen_ratio=(9 / 16)):
+        self.position = np.array(position)
+        self.direction = normalize(np.array(direction))
+        self.up = normalize(np.array(up))
+        self.right = np.cross(self.direction, self.up)
         self.fov_h = fov_h
-        self.axis = axis  # currently only assuming the camera is on the plane where one of the coordinate is 0
-        self.scene = scene
-        self.world_camera_centered = np.vstack([np.hstack([np.eye(3), -np.expand_dims(self.position.p, 1)]),
-                                                np.array([[0, 0, 0, 1]])])
-        self.camera_centered_word = np.vstack([np.hstack([np.eye(3), np.expand_dims(self.position.p, 1)]),
-                                               np.array([[0, 0, 0, 1]])])
+        self.screen_ratio = screen_ratio
+        self.half_screen_width = tan(fov_h)
+        self.half_screen_height = self.half_screen_width * self.screen_ratio
 
-        if self.axis == 0:
-            self.camera_centered_word_wall = np.array([[0, 1, 0, 0], [0, 0, 1, 0], [1, 0, 0, 0], [0, 0, 0, 1]])
-        elif self.axis == 1:
-            self.camera_centered_word_wall = np.array([[1, 0, 0, 0], [0, 0, 1, 0], [0, 1, 0, 0], [0, 0, 0, 1]])
-        else:
-            raise Exception(f"illegal axis {self.axis}")
-        self.wall_camera_centered_word = self.camera_centered_word_wall.T
-
-        self.wall_2d = np.array([[1, 0, 0, 0], [0, 1, 0, 0], [0, 0, 1, 0]])
-
-        self.screen_h = tan(self.fov_h)
-        self.screen_v = self.screen_h / screen_ratio[0] * screen_ratio[1]
-        self.world_2d = self.wall_2d @ self.camera_centered_word_wall @ self.world_camera_centered
-
-    def to_screen(self, point):
-        x, y, z = point
-        screen_x, screen_y = x / z, y / z
-        if abs(screen_x) > self.screen_h and abs(screen_y) > self.screen_v:
+    def capture_point(self, point):
+        assert isinstance(point, Point)
+        segment = point.p - self.position
+        x, y, depth = np.dot(segment, self.right), np.dot(segment, self.up), np.dot(segment, self.direction)
+        if depth <= eps:
             return None
-        return x, y
+        screen_x, screen_y = x / depth, y / depth
+        if abs(screen_x) > self.half_screen_width or abs(screen_y) > self.half_screen_height:
+            return None
+        return screen_x, screen_y
+
+    def camera_centered_point_to_image_corrds(self, point2d, image_width):
+        if point2d is None:
+            return None
+        ratio = image_width / 2 / self.half_screen_width
+        return int((point2d[0] + self.half_screen_width) * ratio), int((point2d[1] + self.half_screen_height) * ratio)
+
+    def point_to_image_corrds(self, point, image_width):
+        return self.camera_centered_point_to_image_corrds(self.capture_point(point), image_width)
+
+    def image_corrds_to_line(self, point, image_width):
+        ratio = self.half_screen_width * 2 / image_width
+        x, y = point[0] * ratio - self.half_screen_width, point[1] * ratio - self.half_screen_height
+        return Line(self.position, x * self.right + y * self.up + self.direction)
