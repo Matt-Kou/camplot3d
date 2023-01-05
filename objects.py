@@ -118,14 +118,16 @@ class Plane:
         assert isinstance(line, Line), "input argument must be a line"
         return line.intersect_plane(self, return_coeffs)
 
+# class Camera:
+
 
 class Scene:
     def __init__(self, size=(1., 1., 1.)):
         self.size = constructor(size)
         self.objects = collections.defaultdict(list)
-        self.objects["corners"] = [constructor(p) * self.size for p in product(range(2), repeat=3)]
-        self.objects["edges"] = [(e1, e2) for e1, e2 in combinations(self.objects["corners"], 2) if
-                                 count_nonzero(e1 != e2) == 1]
+        self.objects["Corners"] = [constructor(p) * self.size for p in product(range(2), repeat=3)]
+        self.objects["Edges"] = [(p1, p2) for p1, p2 in combinations(self.objects["Corners"], 2) if
+                                 count_nonzero(p1 != p2) == 1]
 
     def add(self, obj):
         self.objects[obj.__class__.__name__].append(obj)
@@ -152,6 +154,6 @@ class Scene:
                 radius)
                 for screen_coords in zip(screen_pixels[0], screen_pixels[1])])
 
-    def screen_space_to_world_space(self, screen_coords, camera_pos, screen: Plane, fov_h, screen_pixels):
+    def point_screen_space_to_world_space(self, screen_coords, camera_pos, screen: Plane, fov_h, screen_pixels):
         canonical_coords = self.screen_space_to_canonical_view(screen_coords, fov_h, screen_pixels)
-        return Line(camera_pos, )
+        return Line(camera_pos, canonical_coords[0] * screen.v1 + canonical_coords[1] * screen.v2 - screen.normal)
