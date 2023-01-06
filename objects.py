@@ -2,14 +2,13 @@ import collections
 from itertools import product, combinations
 from math import pi
 
-eps = 1e-8
+eps = 1e-4
 method = "torch"
 if method == "torch":
     import torch
     from torch import vstack, cross, abs, tan, count_nonzero, zeros
 
-    normalize = torch.nn.functional.normalize
-    constructor = torch.Tensor
+    constructor = torch.tensor
     norm = torch.norm
 
 
@@ -17,6 +16,10 @@ if method == "torch":
         Q, R = torch.linalg.qr(A)
         x = torch.linalg.solve_triangular(R, Q.T @ b, upper=True)
         return x
+
+
+    def normalize(v):
+        return v / torch.norm(v)
 elif method == "numpy":
     import numpy as np
     from numpy import vstack, cross, abs, tan, count_nonzero, zeros
@@ -57,11 +60,12 @@ class Point:
     def project_plane(self, plane, perspective=True, eye=None):
         assert isinstance(plane, Plane)
         if perspective:
+            assert eye is not None
             _, x, y, _ = line_from_points(eye, self.p).intersect_plane(plane, return_coeffs=True)
-            return x, y
+            return constructor((x[0], y[0]))
         else:
             diff = self.p - plane.p
-            return diff.dot(plane.v1), diff.dot(plane.v2)
+            return constructor((diff.dot(plane.v1), diff.dot(plane.v2)))
 
 
 class Line:
@@ -71,8 +75,8 @@ class Line:
 
     def distance_line(self, line2, return_vertical_point=False):
         assert isinstance(line2, Line)
-        a = vstack([self.v, line2.v]).transpose()
-        b = line2.p - self.p
+        a = vstack([self.v, line2.v]).T
+        b = (line2.p - self.p)[:, None]
         x = lstsq(a, b)
         d = norm(a @ x - b)
 
@@ -91,11 +95,11 @@ class Line:
 
     def intersect_plane(self, plane, return_coeffs=False):
         assert isinstance(plane, Plane)
-        a = vstack([plane.v1, plane.v2, -self.v])
+        a = vstack([plane.v1, plane.v2, -self.v]).T
         b = self.p - plane.p
-        a1, a2, c = lstsq(a, b)
+        a1, a2, c = lstsq(a, b[:, None])
         intersection = plane.p + a1 * plane.v1 + a2 * plane.v2
-        assert norm(intersection - self.p + self.v * c) <= eps
+        assert norm(self.p + self.v * c - intersection) <= eps
         return (intersection, a1, a2, c) if return_coeffs else intersection
 
 
@@ -118,42 +122,46 @@ class Plane:
         assert isinstance(line, Line), "input argument must be a line"
         return line.intersect_plane(self, return_coeffs)
 
-# class Camera:
+
+class Camera:
+    def __init__(self, cam_position, direction, up, fov_h, screen_pixels, anchor_indexes=None):
+        self.cam_position = cam_position
+        self.direction = normalize(direction)
+        self.up = normalize(up)
+        self.fov_h = constructor(fov_h)
+        self.screen_pixels = torch.tensor(screen_pixels)
+        self.screen = Plane(cam_position + direction, cross(up, -direction), up)
+        self.anchor_indexes = anchor_indexes
+
+    def capture_point(self, point: Point, persepective=True):
+        return self.point_canonical_view_to_screen_space(self.get_point_canoical_view(point, persepective))
+    def get_point_canoical_view(self, point: Point, perspective=True):
+        return point.project_plane(self.screen, perspective=perspective, eye=self.cam_position)
+
+    def screen_space_to_canonical_view(self, screen_coords):
+        return ((2 * screen_coords / self.screen_pixels) - 1) * tan(self.fov_h)
+
+    def point_canonical_view_to_screen_space(self,
+                                             canonical_coords,
+                                             radius=.05,
+                                             intensity=lambda r, radius: 1. if r <= radius else 0.):
+        return constructor(
+            [[intensity(norm(self.screen_space_to_canonical_view(constructor((pix1, pix2))) - canonical_coords), radius)
+             for pix2 in range(self.screen_pixels[1])] for pix1 in range(self.screen_pixels[0])])
+
+    def point_screen_space_to_world_space(self, screen_coords):
+        canonical_coords = self.screen_space_to_canonical_view(screen_coords)
+        return Line(self.cam_position,
+                    canonical_coords[0] * self.screen.v1 + canonical_coords[1] * self.screen.v2 - self.screen.normal)
 
 
 class Scene:
     def __init__(self, size=(1., 1., 1.)):
         self.size = constructor(size)
         self.objects = collections.defaultdict(list)
-        self.objects["Corners"] = [constructor(p) * self.size for p in product(range(2), repeat=3)]
+        self.objects["Corners"] = [Point(constructor(p) * self.size) for p in product(range(2), repeat=3)]
         self.objects["Edges"] = [(p1, p2) for p1, p2 in combinations(self.objects["Corners"], 2) if
-                                 count_nonzero(p1 != p2) == 1]
+                                 count_nonzero(p1.p != p2.p) == 1]
 
     def add(self, obj):
         self.objects[obj.__class__.__name__].append(obj)
-
-    def get_camera_screen(self, cam_position, direction, up):
-        assert -eps <= norm(direction) - 1 <= eps
-        return Plane(cam_position + direction, cross(up, -direction), up)
-
-    def capture_point(self, plane: Plane, point: Point, perspective=True):
-        return point.project_plane(plane, perspective=perspective)
-
-    def screen_space_to_canonical_view(self, screen_coords, fov_h, screen_pixels):
-        return ((2 * screen_coords / screen_pixels) - 1) * tan(fov_h)
-
-    def point_canonical_view_to_screen_space(self,
-                                             canonical_coords,
-                                             fov_h,
-                                             screen_pixels,
-                                             radius=.03,
-                                             intensity=lambda r, radius: 1. if r <= radius else 0.):
-        return constructor(
-            [intensity(
-                norm(self.screen_space_to_canonical_view(screen_coords, fov_h, screen_pixels) - canonical_coords),
-                radius)
-                for screen_coords in zip(screen_pixels[0], screen_pixels[1])])
-
-    def point_screen_space_to_world_space(self, screen_coords, camera_pos, screen: Plane, fov_h, screen_pixels):
-        canonical_coords = self.screen_space_to_canonical_view(screen_coords, fov_h, screen_pixels)
-        return Line(camera_pos, canonical_coords[0] * screen.v1 + canonical_coords[1] * screen.v2 - screen.normal)
