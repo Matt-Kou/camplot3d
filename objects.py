@@ -128,7 +128,7 @@ class Camera:
         self.cam_position = cam_position
         self.direction = normalize(direction)
         self.up = normalize(up)
-        self.fov_h = constructor(fov_h)
+        self.fov_h = fov_h
         self.screen_pixels = torch.tensor(screen_pixels)
         self.screen = Plane(cam_position + direction, cross(up, -direction), up)
         self.anchor_indexes = anchor_indexes
