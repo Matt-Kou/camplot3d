@@ -47,6 +47,10 @@ else:
     raise Exception("Unsupported computation package")
 
 
+def cross_matrix(v):
+    return constructor([[0., -v[2], v[1]], [v[2], 0., -v[0]], [-v[1], v[0], 0.]])
+
+
 class Point:
     def __init__(self, position):
         self.p = constructor(position)
@@ -117,9 +121,24 @@ class Line:
     def add_to_pv_plot(self, pl, width=3, **kwargs):
         pl.add_lines(np.array(vstack([self.p, self.p + self.v])), width=width, **kwargs)
 
+    def mid_point(self, line2, return_coeff=False):
+        assert isinstance(line2, Line)
+        A = vstack([self.v, -line2.v]).T
+        b = line2.p - self.p
+        coeff = lstsq(A, b[:, None])[:, 0]
+        mid = (coeff[0] * self.v + self.p + coeff[1] * line2.v + line2.p) / 2
+        return (mid, coeff) if return_coeff else mid
+
 
 def line_from_points(start, end):
     return Line(start, end - start)
+
+
+def closest_point_to_lines(lines):
+    cross_v = [cross_matrix(line.v) for line in lines]
+    cross_vsq = [x.T @ x for x in cross_v]
+    return lstsq(sum(cross_vsq),
+                 sum([cross_vsq_i @ line_i.p[:, None] for cross_vsq_i, line_i in zip(cross_vsq, lines)]))
 
 
 class Plane:
