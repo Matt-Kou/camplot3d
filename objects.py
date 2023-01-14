@@ -155,6 +155,7 @@ class Camera:
 
     def update_screen(self):
         self.screen = Plane(self.cam_position + self.direction, cross(self.up, -self.direction), self.up)
+
     def capture_point(self, point: Point, perspective=True):
         self.update_screen()
         return self.point_canonical_view_to_screen_space(self.get_point_canonical_view(point, perspective))
@@ -178,20 +179,21 @@ class Camera:
         return Line(self.cam_position,
                     canonical_coords[0] * self.screen.v1 + canonical_coords[1] * self.screen.v2 - self.screen.normal)
 
-    def capture_mesh(self, mesh: trimesh, camera, plot=False, device='cpu', figsize=(10, 10)):
+    def capture_mesh(self, mesh: trimesh, plot=False, device='cpu', figsize=(10, 10)):
         assert mesh_rendering
         verts = torch.from_numpy(mesh.vertices).float()
         faces = torch.from_numpy(mesh.faces).float()
-        R, T = look_at_view_transform(eye=camera.cam_position[None, :].to(device),
-                                      up=camera.up[None, :].to(device),
-                                      at=(camera.cam_position + camera.direction)[None, :].to(device))
+        R, T = look_at_view_transform(eye=self.cam_position[None, :].to(device),
+                                      up=self.up[None, :].to(device),
+                                      at=(self.cam_position + self.direction)[None, :].to(device))
         R = R.to(device)
         T = T.to(device)
         cameras = FoVPerspectiveCameras(R=R, T=T, degrees=False, device=device,
-                                        fov=(2 * camera.fov_h * camera.screen_pixels[1] / camera.screen_pixels[0]),
-                                        aspect_ratio=(camera.screen_pixels[0] / camera.screen_pixels[1])
+                                        # fov=(2 * self.fov_h * self.screen_pixels[1] / self.screen_pixels[0]),
+                                        fov=2 * self.fov_h,
+                                        aspect_ratio=(self.screen_pixels[0] / self.screen_pixels[1])
                                         )
-        raster_settings = RasterizationSettings(image_size=(int(camera.screen_pixels[1]), int(camera.screen_pixels[0])),
+        raster_settings = RasterizationSettings(image_size=(int(self.screen_pixels[1]), int(self.screen_pixels[0])),
                                                 blur_radius=0.0, faces_per_pixel=1
                                                 )
         silhouette_renderer = MeshRenderer(rasterizer=MeshRasterizer(cameras=cameras, raster_settings=raster_settings),
@@ -199,10 +201,11 @@ class Camera:
         mesh = Meshes([verts.to(device)], faces=[faces.to(device)])
         silhouette = silhouette_renderer(meshes_world=mesh.to(device), R=R, T=T, device=device)
         silhouette = silhouette.cpu().numpy().squeeze()[..., 3]
+        silhouette = np.flip(silhouette, axis=0)
         if plot:
             plt.figure(figsize=figsize)
-            plt.imshow(silhouette)
-        return silhouette
+            plt.imshow(silhouette, origin='lower')
+        return silhouette.T
 
 
 class Scene:
@@ -244,6 +247,7 @@ class Scene:
                 # col_avg = (min(indexes[:, 1]) + max(indexes[:, 1])) / 2
                 corners[ind] = img_to_screen_coords(img)
             self.cam_corners_screen_coords.append(corners)
+
     def render(self, plot=False, trace=True, render_set=None, pl=None, **kwargs):
         if not self.cam_corners_screen_coords or not self.cam_point_screen_coords:
             self.get_cam_points_corners_screen()
@@ -267,7 +271,7 @@ class Scene:
 
         mesh_args = kwargs.get("Mesh") or dict()
         for obj_name, l in self.objects.items():
-            if render_set is None or obj_name in render_set:
+            if l and (render_set is None or obj_name in render_set):
                 if obj_name == "Point":
                     pl.add_points(np.stack([np.array(point.p) for point in l]), **point_args)
                 elif obj_name == "Corner":
@@ -278,7 +282,8 @@ class Scene:
                 elif obj_name == "Camera":
                     for camera in l:
                         pl.add_points(np.array(camera.cam_position), **camera_args)
-                        pl.add_arrows(np.array(camera.cam_position), np.array(camera.direction), **camera_direction_args)
+                        pl.add_arrows(np.array(camera.cam_position), np.array(camera.direction),
+                                      **camera_direction_args)
                 elif obj_name == "Trimesh":
                     for mesh in l:
                         pl.add_mesh(mesh, **mesh_args)
@@ -320,7 +325,11 @@ class Scene:
             axs.set_title(f"view from camera {idx}")
 
         plt.show()
+
     def __copy__(self):
         scene = Scene()
         scene.objects.update(self.objects)
         return scene
+
+    def clear_points(self):
+        del self.objects["Point"]
