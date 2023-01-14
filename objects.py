@@ -138,7 +138,7 @@ def closest_point_to_lines(lines):
     cross_v = [cross_matrix(line.v) for line in lines]
     cross_vsq = [x.T @ x for x in cross_v]
     return lstsq(sum(cross_vsq),
-                 sum([cross_vsq_i @ line_i.p[:, None] for cross_vsq_i, line_i in zip(cross_vsq, lines)]))
+                 sum([cross_vsq_i @ line_i.p[:, None] for cross_vsq_i, line_i in zip(cross_vsq, lines)]))[:, 0]
 
 
 class Plane:
@@ -239,6 +239,9 @@ class Scene:
 
     def add(self, obj):
         self.objects[obj.__class__.__name__].append(obj)
+
+    def cameras(self):
+        return self.objects["Camera"]
 
     def detach(self):
         for obj_type, obj_list in self.objects.items():
@@ -351,4 +354,10 @@ class Scene:
         return scene
 
     def clear_points(self):
-        del self.objects["Point"]
+        self.objects["Point"] = []
+
+    def clear_mesh(self):
+        self.objects["Trimesh"] = []
+    def clear_point_mesh(self):
+        self.clear_points()
+        self.clear_mesh()
