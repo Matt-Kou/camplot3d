@@ -6,6 +6,7 @@
 
 Using machine learning to inference on the position and fov of cameras within the scene. See [tutorial](examples/multicamera_calibration.py).
 
-Here is a ![demo video](examples/data/learning.mp4) on the training process.
+Here is a demo video on the training process.
 
-<video src='examples/data/learning.mp4' width=180/>
+https://user-images.githubusercontent.com/36983956/212569056-79a32a89-d923-4c3d-822d-978bb0cd4b69.mp4
+
