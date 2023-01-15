@@ -8,18 +8,19 @@ eps = 1e-4
 method = "torch"
 mesh_rendering = True
 scene_render = True
+multiprocess = True
 if mesh_rendering:
     from pytorch3d.structures import Meshes
     from pytorch3d.renderer import (
         FoVPerspectiveCameras, look_at_view_transform,
         RasterizationSettings, MeshRenderer, MeshRasterizer,
-        SoftSilhouetteShader, TexturesVertex
+        SoftSilhouetteShader
     )
     import matplotlib.pyplot as plt
 if scene_render:
     import pyvista as pv
 if method == "torch":
-    from torch import vstack, stack, cross, abs, tan, count_nonzero, zeros, nonzero
+    from torch import vstack, stack, cross, abs, tan, count_nonzero, zeros, nonzero, square, sqrt, zeros_like, arange
 
     constructor = torch.tensor
     norm = torch.norm
@@ -34,7 +35,7 @@ if method == "torch":
     def normalize(v):
         return v / torch.norm(v)
 elif method == "numpy":
-    from numpy import vstack, stack, cross, abs, tan, count_nonzero, zeros, nonzero
+    from numpy import vstack, stack, cross, abs, tan, count_nonzero, zeros, nonzero, square, sqrt, zeros_like, arange
 
     constructor = np.array
     norm = np.linalg.norm
@@ -159,6 +160,8 @@ class Plane:
 
 def img_to_screen_coords(img):
     indexes = nonzero(img > 0.)
+    if len(indexes) == 0:
+        return torch.tensor([0., 0.])
     return stack([(min(indexes[:, 0]) + max(indexes[:, 0])) / 2, (min(indexes[:, 1]) + max(indexes[:, 1])) / 2])
 
 
@@ -168,9 +171,15 @@ class Camera:
         self.direction = normalize(direction)
         self.up = normalize(up)
         self.fov_h = fov_h
-        self.screen_pixels = constructor(screen_pixels)
         self.anchor_indexes = anchor_indexes
         self.update_screen()
+        self.screen_pixels = None
+        self.aspect_ratio = None
+        self.update_screen_pixels(screen_pixels)
+
+    def update_screen_pixels(self, screen_pixels):
+        self.screen_pixels = screen_pixels
+        self.aspect_ratio = screen_pixels[0] / screen_pixels[1]
 
     def update_screen(self):
         self.screen = Plane(self.cam_position + self.direction, cross(self.up, -self.direction), self.up)
@@ -183,12 +192,30 @@ class Camera:
         return point.project_plane(self.screen, perspective=perspective, eye=self.cam_position)
 
     def screen_space_to_canonical_view(self, screen_coords):
-        return ((2 * screen_coords / self.screen_pixels) - 1) * tan(self.fov_h)
+        return (2 * screen_coords / self.screen_pixels - 1) * stack([tan(self.fov_h), tan(self.fov_h) / self.aspect_ratio])
+
+    def screen_space_to_canonical_view_1d(self, pix, length, tan_fov):
+        return (2 * pix / length - 1) * tan_fov
+
 
     def point_canonical_view_to_screen_space(self,
                                              canonical_coords,
                                              radius=.05,
                                              intensity=lambda r, radius: 1. if r <= radius else 0.):
+        tan_fov = stack([tan(self.fov_h), tan(self.fov_h) / self.aspect_ratio])
+        if multiprocess:
+            tan_h = tan(self.fov_h)
+            tan_v = tan_h / self.aspect_ratio
+            h = self.screen_space_to_canonical_view_1d(arange(self.screen_pixels[0]), self.screen_pixels[0], tan_h)
+            dh_sq = square(h-canonical_coords[0])
+            v = self.screen_space_to_canonical_view_1d(arange(self.screen_pixels[1]), self.screen_pixels[1], tan_v)
+            dv_sq = square(v-canonical_coords[1])
+            s = dh_sq[:, None].repeat(1, self.screen_pixels[1]) + dv_sq.repeat(self.screen_pixels[0], 1)
+            loc = s < radius * radius
+            res = zeros_like(s)
+            res[loc] = torch.tensor([intensity(r, radius) for r in sqrt(s[loc])])
+            return res
+
         return constructor(
             [[intensity(norm(self.screen_space_to_canonical_view(constructor((pix1, pix2))) - canonical_coords), radius)
               for pix2 in range(self.screen_pixels[1])] for pix1 in range(self.screen_pixels[0])])
@@ -228,14 +255,14 @@ class Camera:
 
 
 class Scene:
-    def __init__(self, size=(1., 1., 1.)):
+    def __init__(self, size=(1., 1., 1.), cam_point_screen_coords=None, cam_corners_screen_coords=None):
         self.size = constructor(size)
         self.objects = collections.defaultdict(list)
         self.objects["Corner"] = [Point(constructor(p) * self.size) for p in product(range(2), repeat=3)]
         self.objects["Edge"] = [(p1, p2) for p1, p2 in combinations(self.objects["Corner"], 2) if
                                 count_nonzero(p1.p != p2.p) == 1]
-        self.cam_point_screen_coords = None
-        self.cam_corners_screen_coords = None
+        self.cam_point_screen_coords = cam_point_screen_coords
+        self.cam_corners_screen_coords = cam_corners_screen_coords
 
     def add(self, obj):
         self.objects[obj.__class__.__name__].append(obj)
@@ -264,17 +291,23 @@ class Scene:
             corners = {}
             for ind in camera.anchor_indexes:
                 img = camera.capture_point(self.objects["Corner"][ind])
-                # indexes = nonzero(img > 0.)
-                # row_avg = (min(indexes[:, 0]) + max(indexes[:, 0])) / 2
-                # col_avg = (min(indexes[:, 1]) + max(indexes[:, 1])) / 2
                 corners[ind] = img_to_screen_coords(img)
             self.cam_corners_screen_coords.append(corners)
 
-    def render(self, plot=False, trace=True, render_set=None, pl=None, **kwargs):
+    def render(self,
+               plot=False,
+               trace=True,
+               render_set=None,
+               pl=None,
+               title=None,
+               error=5e-2,
+               screenshot=False,
+               **kwargs):
         if not self.cam_corners_screen_coords or not self.cam_point_screen_coords:
             self.get_cam_points_corners_screen()
-        pl = pl or pv.Plotter()
-
+        pl = pl or (pv.Plotter(off_screen=True) if screenshot else pv.Plotter())
+        if title:
+            pl.add_title(title, **kwargs.get("Title", {}))
         point_args = {"point_size": 10, "color": "red", "render_points_as_spheres": True}
         point_args.update(kwargs.get("Point", {}))
 
@@ -288,6 +321,7 @@ class Scene:
         corner_args.update(kwargs.get("Corner", {}))
 
         camera_args = {"point_size": 10, "color": "green", "render_points_as_spheres": True}
+        camera_args.update(kwargs.get("Camera", {}))
         camera_direction_args = {"mag": .13}
         camera_direction_args.update(kwargs.get("Camera direction", {}))
 
@@ -312,25 +346,31 @@ class Scene:
 
         if trace:
             corner_trace_args = {"color": "white", "width": 3}
-            corner_trace_args.update(kwargs.get("Corner Trace", {}))
+            corner_trace_args.update(kwargs.get("CornerTrace", {}))
             point_trace_args = {"color": "blue", "width": 3}
-            point_trace_args.update(kwargs.get("Point Trace", {}))
+            point_trace_args.update(kwargs.get("PointTrace", {}))
             for cam_idx, camera in enumerate(self.objects["Camera"]):
                 for corner_idx, corner_coords in self.cam_corners_screen_coords[cam_idx].items():
                     line = camera.point_screen_space_to_world_space(corner_coords)
-                    assert self.objects["Corner"][corner_idx].distance_line(line) <= 5e-2, \
-                        self.objects["Corner"][corner_idx].distance_line(line)
+                    if error:
+                        assert self.objects["Corner"][corner_idx].distance_line(line) <= error, \
+                            self.objects["Corner"][corner_idx].distance_line(line)
                     line.add_to_pv_plot(pl, **corner_trace_args)
                 for point_idx, point_coords in enumerate(self.cam_point_screen_coords[cam_idx]):
                     line = camera.point_screen_space_to_world_space(point_coords)
-                    assert self.objects["Point"][point_idx].distance_line(line) <= 5e-2, \
-                        self.objects["Point"][point_idx].distance_line(line)
+                    if error:
+                        assert self.objects["Point"][point_idx].distance_line(line) <= error, \
+                            self.objects["Point"][point_idx].distance_line(line)
                     line.add_to_pv_plot(pl, **point_trace_args)
+
         if plot:
             pl.add_camera_orientation_widget()
             pl.show_grid()
             pl.view_isometric()
-            pl.show()
+            if screenshot:
+                pl.screenshot(**screenshot)
+            else:
+                pl.show()
             pl.close()
         else:
             return pl
@@ -358,6 +398,7 @@ class Scene:
 
     def clear_mesh(self):
         self.objects["Trimesh"] = []
+
     def clear_point_mesh(self):
         self.clear_points()
         self.clear_mesh()
