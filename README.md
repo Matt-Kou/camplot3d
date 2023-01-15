@@ -8,4 +8,4 @@ Using machine learning to inference on the position and fov of cameras within th
 
 Here is a ![demo video](examples/data/learning.mp4) on the training process.
 
-examples/data/learning.mp4
+<video src='examples/data/learning.mp4' width=180/>
