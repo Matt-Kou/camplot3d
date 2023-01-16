@@ -20,7 +20,8 @@ if mesh_rendering:
 if scene_render:
     import pyvista as pv
 if method == "torch":
-    from torch import vstack, stack, cross, abs, tan, count_nonzero, zeros, nonzero, square, sqrt, zeros_like, arange
+    from torch import vstack, stack, cross, abs, tan, arctan, count_nonzero, zeros, nonzero, square, sqrt, zeros_like, \
+        arange
 
     constructor = torch.tensor
     norm = torch.norm
@@ -35,7 +36,8 @@ if method == "torch":
     def normalize(v):
         return v / torch.norm(v)
 elif method == "numpy":
-    from numpy import vstack, stack, cross, abs, tan, count_nonzero, zeros, nonzero, square, sqrt, zeros_like, arange
+    from numpy import vstack, stack, cross, abs, tan, arctan, count_nonzero, zeros, nonzero, square, sqrt, zeros_like, \
+        arange
 
     constructor = np.array
     norm = np.linalg.norm
@@ -192,11 +194,11 @@ class Camera:
         return point.project_plane(self.screen, perspective=perspective, eye=self.cam_position)
 
     def screen_space_to_canonical_view(self, screen_coords):
-        return (2 * screen_coords / self.screen_pixels - 1) * stack([tan(self.fov_h), tan(self.fov_h) / self.aspect_ratio])
+        return (2 * screen_coords / self.screen_pixels - 1) * stack(
+            [tan(self.fov_h), tan(self.fov_h) / self.aspect_ratio])
 
     def screen_space_to_canonical_view_1d(self, pix, length, tan_fov):
         return (2 * pix / length - 1) * tan_fov
-
 
     def point_canonical_view_to_screen_space(self,
                                              canonical_coords,
@@ -207,9 +209,9 @@ class Camera:
             tan_h = tan(self.fov_h)
             tan_v = tan_h / self.aspect_ratio
             h = self.screen_space_to_canonical_view_1d(arange(self.screen_pixels[0]), self.screen_pixels[0], tan_h)
-            dh_sq = square(h-canonical_coords[0])
+            dh_sq = square(h - canonical_coords[0])
             v = self.screen_space_to_canonical_view_1d(arange(self.screen_pixels[1]), self.screen_pixels[1], tan_v)
-            dv_sq = square(v-canonical_coords[1])
+            dv_sq = square(v - canonical_coords[1])
             s = dh_sq[:, None].repeat(1, self.screen_pixels[1]) + dv_sq.repeat(self.screen_pixels[0], 1)
             loc = s < radius * radius
             res = zeros_like(s)
@@ -234,10 +236,10 @@ class Camera:
                                       at=(self.cam_position + self.direction)[None, :].to(device))
         R = R.to(device)
         T = T.to(device)
+        # Why not input the aspect ratio?
         cameras = FoVPerspectiveCameras(R=R, T=T, degrees=False, device=device,
-                                        # fov=(2 * self.fov_h * self.screen_pixels[1] / self.screen_pixels[0]),
-                                        fov=2 * self.fov_h,
-                                        aspect_ratio=(self.screen_pixels[0] / self.screen_pixels[1])
+                                        fov=2 * arctan(tan(self.fov_h) / self.aspect_ratio),
+                                        # aspect_ratio=(self.screen_pixels[0] / self.screen_pixels[1]),
                                         )
         raster_settings = RasterizationSettings(image_size=(int(self.screen_pixels[1]), int(self.screen_pixels[0])),
                                                 blur_radius=0.0, faces_per_pixel=1
@@ -251,6 +253,7 @@ class Camera:
         if plot:
             plt.figure(figsize=figsize)
             plt.imshow(silhouette, origin='lower')
+            plt.show()
         return silhouette.T
 
 
