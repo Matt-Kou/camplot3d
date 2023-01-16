@@ -20,8 +20,16 @@ positions. The lines are the ray tracing lines for inferencing the positions and
 
 After calibrating the cameras, the two cameras are now able to detect the 3D position of any items in the scene.
 
-Here is the object placed in the scene: ![image](examples/plots/object_scene.png)
-Here is the position detection result: ![image](examples/plots/position_detection.png)
+Here is the object placed in the scene: 
+
+![image](examples/plots/object_scene.png)
+
+
+Here is the position detection result: 
+
+![image](examples/plots/position_detection.png)
+
+
 The red point is the true object center (1/2, 1/2, 1/3), and the cyan point is the detected object position (0.4969,
 0.5038, 0.3421). The pink rays indicate the tracing rays from the captured
 images: 
