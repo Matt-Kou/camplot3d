@@ -15,6 +15,7 @@ if torch.cuda.is_available():
 else:
     device = torch.device("cpu")
 
+screenshot = True
 # Load the obj and ignore the textures and materials.
 verts, faces_idx, _ = load_obj("data/teapot.obj")
 faces = faces_idx.verts_idx
@@ -32,30 +33,36 @@ with open("data/scene", 'rb') as f:
     scene = copy.copy(pickle.load(f))
 scene.clear_points()
 scene.add(mesh)
-scene.render(plot=True, trace=False)
+if screenshot:
+    pl = scene.render(plot=False, trace=False, screenshot=True)
+    pl.view_xz()
+    pl.screenshot("plots/object_scene")
+else:
+    scene.render(plot=True, trace=False)
 
 # find tracing rays
-#
-pl = pv.Plotter()
+pl = pv.Plotter(off_screen=True) if screenshot else pv.Plotter()
 lines = []
 for camera in scene.cameras():
     img = camera.capture_mesh(mesh, plot=True, device=device)
     screen_coords = img_to_screen_coords(torch.from_numpy(img.copy()))
     line = camera.point_screen_space_to_world_space(screen_coords)
-    line.add_to_pv_plot(pl, color="blue")
+    line.add_to_pv_plot(pl, color="pink")
     lines.append(line)
-# find the point closest to the tracing rays, and add as a green point
-point = closest_point_to_lines(lines)
-print("point:", point)
-pl.add_points(point.numpy(), point_size=10, color="green", render_points_as_spheres=True)
 
-# show the tracing rays in pink
-for camera in scene.cameras():
-    line_from_points(camera.cam_position, point).add_to_pv_plot(pl, color="pink")
+# find the point closest to the tracing rays, and add as a cyan point
+point = closest_point_to_lines(lines)
+print("detected point:", point)
+pl.add_points(point.numpy(), point_size=10, color="cyan", render_points_as_spheres=True)
 
 # add true center as red color
 pl.add_points(np.array([1 / 2, 1 / 2, 1 / 3]), color="red", render_points_as_spheres=True, point_size=10)
 
 # render the tracing result
 scene.clear_point_mesh()
-scene.render(pl=pl, plot=True, trace=False)
+if screenshot:
+    scene.render(pl=pl, plot=False, trace=False)
+    pl.view_xz()
+    pl.screenshot("plots/position_detection")
+else:
+    scene.render(pl=pl, plot=True, tace=False)
